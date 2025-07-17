@@ -147,8 +147,10 @@ tables = {
     "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("stok_satis_tablosu.xlsx")
 }
 st.info("📤 Dosya yükleniyor...")
+
 if urun_bilgisi_dosyasi:
     urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
+    st.success("✅ Dosya yüklendi, dağıtım hesaplanacak.")
 
     with st.spinner("🔄 Dağıtım planı hesaplanıyor..."):
         dagitim_planlari = [calculate_distribution_plan(tables, urun) for _, urun in urun_bilgisi.iterrows()]
