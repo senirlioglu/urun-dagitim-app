@@ -12,11 +12,11 @@ ust_mal_grubu_ciro = st.sidebar.file_uploader("Üst Mal Grubu Ciro Tablosu", typ
 raf_sepet_bilgi = st.sidebar.file_uploader("Raf Sepet Bilgi Tablosu", type="xlsx")
 magaza_bilgi = st.sidebar.file_uploader("Mağaza Bilgi Tablosu", type="xlsx")
 tables = {
-    "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis)),
-    "Ürün Grubu Ciro Tablosu": normalize_columns(pd.read_excel(urun_grubu_ciro)),
-    "Üss Mal Grubu Ciro Tablosu": normalize_columns(pd.read_excel(ust_mal_grubu_ciro)),
-    "Raf Sepet Bilgi Tablosu": normalize_columns(pd.read_excel(raf_sepet_bilgi)),
-    "Mağaza Bilgi Tablosu": normalize_columns(pd.read_excel(magaza_bilgi)),
+    "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_tablosu)),
+    "Ürün Grubu Ciro Tablosu": normalize_columns(pd.read_excel(urun_grubu_ciro_tablosu)),
+    "Üss Mal Grubu Ciro Tablosu": normalize_columns(pd.read_excel(ust_mal_grubu_ciro_tablosu)),
+    "Raf Sepet Bilgi Tablosu": normalize_columns(pd.read_excel(raf_sepet_bilgi_tablosu)),
+    "Mağaza Bilgi Tablosu": normalize_columns(pd.read_excel(magaza_bilgi_tablosu)),
 }
 
 
