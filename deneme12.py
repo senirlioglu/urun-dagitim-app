@@ -36,6 +36,15 @@ tables = {
 
 if urun_bilgisi_dosyasi:
     urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
+     with st.spinner("Dağıtım planı hesaplanıyor..."):
+        dagitim_planlari = [calculate_distribution_plan(tables, urun) for _, urun in urun_bilgisi.iterrows()]
+        birlesmis = pd.concat(dagitim_planlari)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        birlesmis.to_excel(writer, index=False)
+    st.download_button("📥 İndir", output.getvalue(), "dagitim_plani.xlsx")
+
 
     # (Buradan sonrası senin calculate_distribution_plan fonksiyonunla devam eder...)
 
@@ -217,11 +226,4 @@ def calculate_distribution_plan(tables, urun):
     return dagitim_verileri
 
 
-    with st.spinner("Dağıtım planı hesaplanıyor..."):
-        dagitim_planlari = [calculate_distribution_plan(tables, urun) for _, urun in urun_bilgisi.iterrows()]
-        birlesmis = pd.concat(dagitim_planlari)
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        birlesmis.to_excel(writer, index=False)
-    st.download_button("📥 İndir", output.getvalue(), "dagitim_plani.xlsx")
+   
