@@ -4,27 +4,43 @@ import io
 from math import floor
 import os
 
-st.sidebar.title("📁 Yardımcı Tabloları Yükleyin")
+import streamlit as st
+import pandas as pd
+import io
+from math import floor
+import os
 
-stok_satis = st.sidebar.file_uploader("Stok Satış Tablosu", type="xlsx")
-urun_grubu_ciro = st.sidebar.file_uploader("Ürün Grubu Ciro Tablosu", type="xlsx")
-ust_mal_grubu_ciro = st.sidebar.file_uploader("Üst Mal Grubu Ciro Tablosu", type="xlsx")
-raf_sepet_bilgi = st.sidebar.file_uploader("Raf Sepet Bilgi Tablosu", type="xlsx")
-magaza_bilgi = st.sidebar.file_uploader("Mağaza Bilgi Tablosu", type="xlsx")
-tables = {
-    "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_tablosu)),
-    "Ürün Grubu Ciro Tablosu": normalize_columns(pd.read_excel(urun_grubu_ciro_tablosu)),
-    "Üss Mal Grubu Ciro Tablosu": normalize_columns(pd.read_excel(ust_mal_grubu_ciro_tablosu)),
-    "Raf Sepet Bilgi Tablosu": normalize_columns(pd.read_excel(raf_sepet_bilgi_tablosu)),
-    "Mağaza Bilgi Tablosu": normalize_columns(pd.read_excel(magaza_bilgi_tablosu)),
-}
+st.title("🧮 Gelişmiş Ürün Dağıtım Planı")
 
-
-# Normalizasyon ve veri hazırlama fonksiyonları
 def normalize_columns(df):
     turkish_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
     df.columns = df.columns.str.strip().str.lower().str.translate(turkish_map).str.replace(" ", "_")
     return df
+
+# Kullanıcının yükleyeceği dosyalar (sadece 2 tanesi)
+urun_bilgisi_dosyasi = st.file_uploader("📥 Ürün Bilgisi Dosyası (xlsx)", type=["xlsx"])
+stok_satis_file = st.file_uploader("📥 Güncel Stok-Satış Dosyası (varsa)", type=["xlsx"])
+
+# Yardımcı tablolar Streamlit Cloud’a yüklenen dosyalardan okunuyor
+def load_local_excel(path):
+    return normalize_columns(pd.read_excel(path))
+
+tables = {
+    "Ürün Grubu Ciro Tablosu": load_local_excel("urun_grubu_ciro_tablosu.xlsx"),
+    "Üss Mal Grubu Ciro Tablosu": load_local_excel("ust_mal_grubu_ciro_tablosu.xlsx"),
+    "Raf Sepet Bilgi Tablosu": load_local_excel("raf_sepet_bilgi_tablosu.xlsx"),
+    "Mağaza Bilgi Tablosu": load_local_excel("magaza_bilgi_tablosu.xlsx"),
+    # Stok Satış Tablosu yüklenmişse onu kullan, yoksa repo’dakini
+    "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("stok_satis_tablosu.xlsx")
+}
+
+if urun_bilgisi_dosyasi:
+    urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
+
+    # (Buradan sonrası senin calculate_distribution_plan fonksiyonunla devam eder...)
+
+
+
 
 def load_table(file_path):
     return normalize_columns(pd.read_excel(file_path))
