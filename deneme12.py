@@ -146,7 +146,7 @@ tables = {
     "Mağaza Bilgi Tablosu": load_local_excel("magaza_bilgi_tablosu.xlsx"),
     "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("stok_satis_tablosu.xlsx")
 }
-
+st.info("📤 Dosya yükleniyor...")
 if urun_bilgisi_dosyasi:
     urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
 
