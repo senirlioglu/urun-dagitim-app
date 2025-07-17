@@ -36,7 +36,8 @@ tables = {
 
 if urun_bilgisi_dosyasi:
     urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
-     with st.spinner("Dağıtım planı hesaplanıyor..."):
+     
+with st.spinner("Dağıtım planı hesaplanıyor..."):
         dagitim_planlari = [calculate_distribution_plan(tables, urun) for _, urun in urun_bilgisi.iterrows()]
         birlesmis = pd.concat(dagitim_planlari)
 
