@@ -4,14 +4,21 @@ import io
 from math import floor
 import os
 
-# Sabit dosya yolları
-TABLO_YOLLARI = {
-    "Stok Satış Tablosu": "C:/Users/ziya.senirli/Dağıtım Sistemi/stok_satis_tablosu.xlsx",
-    "Ürün Grubu Ciro Tablosu": "C:/Users/ziya.senirli/Dağıtım Sistemi/urun_grubu_ciro_tablosu.xlsx",
-    "Üss Mal Grubu Ciro Tablosu": "C:/Users/ziya.senirli/Dağıtım Sistemi/ust_mal_grubu_ciro_tablosu.xlsx",
-    "Raf Sepet Bilgi Tablosu": "C:/Users/ziya.senirli/Dağıtım Sistemi/raf_sepet_bilgi_tablosu.xlsx",
-    "Mağaza Bilgi Tablosu": "C:/Users/ziya.senirli/Dağıtım Sistemi/magaza_bilgi_tablosu.xlsx",
+st.sidebar.title("📁 Yardımcı Tabloları Yükleyin")
+
+stok_satis = st.sidebar.file_uploader("Stok Satış Tablosu", type="xlsx")
+urun_grubu_ciro = st.sidebar.file_uploader("Ürün Grubu Ciro Tablosu", type="xlsx")
+ust_mal_grubu_ciro = st.sidebar.file_uploader("Üst Mal Grubu Ciro Tablosu", type="xlsx")
+raf_sepet_bilgi = st.sidebar.file_uploader("Raf Sepet Bilgi Tablosu", type="xlsx")
+magaza_bilgi = st.sidebar.file_uploader("Mağaza Bilgi Tablosu", type="xlsx")
+tables = {
+    "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis)),
+    "Ürün Grubu Ciro Tablosu": normalize_columns(pd.read_excel(urun_grubu_ciro)),
+    "Üss Mal Grubu Ciro Tablosu": normalize_columns(pd.read_excel(ust_mal_grubu_ciro)),
+    "Raf Sepet Bilgi Tablosu": normalize_columns(pd.read_excel(raf_sepet_bilgi)),
+    "Mağaza Bilgi Tablosu": normalize_columns(pd.read_excel(magaza_bilgi)),
 }
+
 
 # Normalizasyon ve veri hazırlama fonksiyonları
 def normalize_columns(df):
