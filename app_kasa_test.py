@@ -345,10 +345,10 @@ if kategori == "Grup Spot":
 else:  # Kasa Aktivitesi
     tables = {
         "KS Mağaza Bilgi": load_local_excel("magaza_bilgi_tablosu.xlsx"),
-        "KS Ciro": load_local_excel("ks_ciro_tablosu.xlsx"),
-        "KS Mal Grubu": load_local_excel("ks_mal_grubu_tablosu.xlsx"),
-        "KS Üst Mal Grubu": load_local_excel("ks_ust_mal_grubu_tablosu.xlsx"),
-        "KS Stok Satış": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("ks_stok_satis_tablosu.xlsx")
+        "KS Ciro": load_local_excel("ks_ciro.xlsx"),
+        "KS Mal Grubu": load_local_excel("ks_mal.xlsx"),
+        "KS Üst Mal Grubu": load_local_excel("ks_ust_mal.xlsx"),
+        "KS Stok Satış": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("ks_stok_satis.xlsx")
     }
     
     # Sütun isimlerini birleştir
