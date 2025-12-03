@@ -363,6 +363,14 @@ if missing_tables:
     st.info("💡 Lütfen tüm gerekli Excel dosyalarını aynı klasöre yerleştirin.")
 else:
     st.success(f"✅ Tüm tablolar yüklendi ({kategori})")
+    
+    # Debug: Tablo bilgilerini göster
+    with st.expander("🔍 Yüklenen Tablo Detayları (Debug)"):
+        for name, table in tables.items():
+            if table is not None:
+                st.write(f"**{name}:** {len(table)} satır, Sütunlar: {', '.join(table.columns.tolist()[:10])}")
+            else:
+                st.write(f"**{name}:** ❌ Yüklenemedi")
 
 if urun_bilgisi_dosyasi and not missing_tables:
     urun_bilgisi = normalize_columns(pd.read_excel(urun_bilgisi_dosyasi))
@@ -380,15 +388,28 @@ if urun_bilgisi_dosyasi and not missing_tables:
             progress_bar = st.progress(0)
             
             for idx, (_, urun) in enumerate(urun_bilgisi.iterrows()):
-                if kategori == "Grup Spot":
-                    plan = calculate_distribution_plan(tables, urun)
-                else:  # Kasa Aktivitesi
-                    plan = calculate_kasa_aktivitesi(tables, urun)
+                try:
+                    if kategori == "Grup Spot":
+                        plan = calculate_distribution_plan(tables, urun)
+                    else:  # Kasa Aktivitesi
+                        plan = calculate_kasa_aktivitesi(tables, urun)
+                    
+                    if plan is not None and not plan.empty:
+                        dagitim_planlari.append(plan)
+                    else:
+                        st.warning(f"⚠️ Ürün {urun.get('urun_kodu', 'bilinmeyen')} için plan oluşturulamadı")
+                        
+                except Exception as e:
+                    st.error(f"❌ Hata (Ürün {idx+1}): {str(e)}")
+                    st.write("**Ürün Bilgisi:**", urun.to_dict())
                 
-                dagitim_planlari.append(plan)
                 progress_bar.progress((idx + 1) / len(urun_bilgisi))
             
             progress_bar.empty()
+            
+            if not dagitim_planlari:
+                st.error("❌ Hiçbir dağıtım planı oluşturulamadı! Lütfen yukarıdaki hataları kontrol edin.")
+                st.stop()
             
             birlesmis = pd.concat(dagitim_planlari, ignore_index=True)
             
