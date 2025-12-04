@@ -18,6 +18,28 @@ def load_local_excel(path):
     except:
         return None
 
+def load_file(file_path_or_buffer):
+    """Excel veya CSV dosyası yükler"""
+    try:
+        if isinstance(file_path_or_buffer, str):
+            # Dosya yolu ise uzantıya bak
+            if file_path_or_buffer.endswith('.csv'):
+                return normalize_columns(pd.read_csv(file_path_or_buffer))
+            else:
+                return normalize_columns(pd.read_excel(file_path_or_buffer))
+        else:
+            # Uploaded file ise
+            try:
+                # Önce Excel dene
+                return normalize_columns(pd.read_excel(file_path_or_buffer))
+            except:
+                # CSV dene
+                file_path_or_buffer.seek(0)  # Dosya başına dön
+                return normalize_columns(pd.read_csv(file_path_or_buffer))
+    except Exception as e:
+        st.error(f"❌ Dosya yükleme hatası: {str(e)}")
+        return None
+
 def normalize_column(df, column):
     if column not in df.columns or df[column].nunique() == 0:
         return pd.Series([0]*len(df))
@@ -26,8 +48,9 @@ def normalize_column(df, column):
     return (df[column] - col_min) / (col_max - col_min) if (col_max - col_min) != 0 else df[column].apply(lambda x: 1 if x != 0 else 0)
 
 def map_hangi_ilce_score(ilce):
-    ilce_weights = {"muratpasa": 1.0, "kepez": 0.7}
-    return ilce_weights.get(str(ilce).lower(), 0)
+    ilce_str = str(ilce).lower().strip()
+    ilce_weights = {"muratpasa": 1.0, "muratpa": 1.0, "kepez": 0.7}
+    return ilce_weights.get(ilce_str, 0)
 
 def map_magaza_tipi_score(tipi):
     tipi_weights = {"large": 0.6, "spot": 0.4, "standart": 0.3}
@@ -175,21 +198,83 @@ def calculate_kasa_aktivitesi(tables, urun):
     
     # Stok-Satış tablosunu birleştir
     if "KS Stok Satış" in tables and tables["KS Stok Satış"] is not None:
-        stok_satis = tables["KS Stok Satış"][["magaza_kodu", "urun_kodu", "stok", "satis_4hafta"]].copy()
+        # İhtiyacımız olan sütunlar
+        required_cols = ["magaza_kodu", "urun_kodu", "stok", "satis_4hafta"]
+        
+        # 4 hafta sonunda stok sütunu var mı kontrol et
+        stok_cols = [col for col in tables["KS Stok Satış"].columns if "4_hafta" in col and "stok" in col]
+        if stok_cols:
+            required_cols.append(stok_cols[0])  # İlk eşleşeni al
+            stok_4hafta_col = stok_cols[0]
+        else:
+            # Yoksa sütun ismine göre tahmin et
+            possible_names = ["4_hafta_sonunda_stok", "stok_4hafta_sonunda", "stok_4_hafta"]
+            for name in possible_names:
+                if name in tables["KS Stok Satış"].columns:
+                    required_cols.append(name)
+                    stok_4hafta_col = name
+                    break
+            else:
+                stok_4hafta_col = None
+        
+        available_cols = [col for col in required_cols if col in tables["KS Stok Satış"].columns]
+        stok_satis = tables["KS Stok Satış"][available_cols].copy()
+        
+        # Ürün kodu eşleştirme - tam eşleşme dene
         dagitim_verileri = dagitim_verileri.merge(
             stok_satis,
             on=["magaza_kodu", "urun_kodu"],
             how="left"
         )
+        
+        # Eğer hiç eşleşme yoksa, ürün kodunun ilk 8 hanesine göre eşleştir
+        if dagitim_verileri["stok"].isna().all():
+            st.warning("⚠️ Ürün kodu tam eşleşmedi, alternatif eşleştirme deneniyor...")
+            cols_to_drop = ["stok", "satis_4hafta"]
+            if stok_4hafta_col:
+                cols_to_drop.append(stok_4hafta_col)
+            dagitim_verileri = dagitim_verileri.drop(columns=cols_to_drop, errors='ignore')
+            
+            # Ürün kodunu string'e çevir ve ilk 8 haneyi al
+            dagitim_verileri["urun_prefix"] = dagitim_verileri["urun_kodu"].astype(str).str[:8]
+            stok_satis["urun_prefix"] = stok_satis["urun_kodu"].astype(str).str[:8]
+            
+            # Prefix'e göre grup oluştur ve topla
+            agg_dict = {"stok": "sum", "satis_4hafta": "sum"}
+            if stok_4hafta_col and stok_4hafta_col in stok_satis.columns:
+                agg_dict[stok_4hafta_col] = "sum"
+            
+            stok_grouped = stok_satis.groupby(["magaza_kodu", "urun_prefix"]).agg(agg_dict).reset_index()
+            
+            dagitim_verileri = dagitim_verileri.merge(
+                stok_grouped,
+                on=["magaza_kodu", "urun_prefix"],
+                how="left"
+            )
+            
+            dagitim_verileri.drop(columns=["urun_prefix"], inplace=True)
+        
+        # 4 hafta sonunda stok sütununu standart isme çevir
+        if stok_4hafta_col and stok_4hafta_col in dagitim_verileri.columns:
+            dagitim_verileri.rename(columns={stok_4hafta_col: "stok_4hafta_sonunda"}, inplace=True)
     
     # KS Ciro tablosunu birleştir
     if "KS Ciro" in tables and tables["KS Ciro"] is not None:
-        ks_ciro = tables["KS Ciro"][["magaza_kodu", "ks_ciro"]].copy()
-        dagitim_verileri = dagitim_verileri.merge(
-            ks_ciro,
-            on="magaza_kodu",
-            how="left"
-        )
+        # ks_ciro sütunu var mı kontrol et
+        ciro_col = None
+        if "ks_ciro" in tables["KS Ciro"].columns:
+            ciro_col = "ks_ciro"
+        elif "kasa_aktivitesi_ciro" in tables["KS Ciro"].columns:
+            ciro_col = "kasa_aktivitesi_ciro"
+        
+        if ciro_col:
+            ks_ciro = tables["KS Ciro"][["magaza_kodu", ciro_col]].copy()
+            ks_ciro.rename(columns={ciro_col: "ks_ciro"}, inplace=True)
+            dagitim_verileri = dagitim_verileri.merge(
+                ks_ciro,
+                on="magaza_kodu",
+                how="left"
+            )
     
     # Yeni ürün ise mal grubu cirolarını ekle
     if urun.get("yeni_mi", "eski") == "yeni":
@@ -212,31 +297,50 @@ def calculate_kasa_aktivitesi(tables, urun):
             )
     
     # Eksik değerleri doldur
-    for col in ["stok", "satis_4hafta", "ks_ciro", "mal_grubu_ciro", "ust_mal_grubu_ciro"]:
+    for col in ["stok", "satis_4hafta", "stok_4hafta_sonunda", "ks_ciro", "mal_grubu_ciro", "ust_mal_grubu_ciro"]:
         if col in dagitim_verileri.columns:
             dagitim_verileri[col] = dagitim_verileri[col].fillna(0)
     
-    # Stok oranı hesapla
+    # Negatif stokları 0'a çevir
     dagitim_verileri["stok"] = dagitim_verileri["stok"].clip(lower=0)
-    dagitim_verileri["stok_orani"] = dagitim_verileri["stok"] / (dagitim_verileri["stok"] + dagitim_verileri["satis_4hafta"] + 1e-9)
+    if "stok_4hafta_sonunda" in dagitim_verileri.columns:
+        dagitim_verileri["stok_4hafta_sonunda"] = dagitim_verileri["stok_4hafta_sonunda"].clip(lower=0)
+    
+    # ARA DÖNEM SATIŞ HESAPLAMA (YENİ!)
+    if "stok_4hafta_sonunda" in dagitim_verileri.columns:
+        dagitim_verileri["ara_satis"] = (
+            dagitim_verileri["stok_4hafta_sonunda"] - dagitim_verileri["stok"]
+        ).clip(lower=0)
+    else:
+        dagitim_verileri["ara_satis"] = 0
+    
+    # TOPLAM SATIŞ GÜCÜ (4 haftalık + ara satış × 0.5)
+    dagitim_verileri["toplam_satis_gucu"] = (
+        dagitim_verileri["satis_4hafta"] + (dagitim_verileri["ara_satis"] * 0.5)
+    )
+    
+    # Stok oranı hesapla (mevcut formül)
+    dagitim_verileri["stok_orani"] = dagitim_verileri["stok"] / (
+        dagitim_verileri["stok"] + dagitim_verileri["satis_4hafta"] + 1e-9
+    )
     
     # İlçe skoru
     dagitim_verileri["hangi_ilce_score"] = dagitim_verileri["hangi_ilce"].apply(map_hangi_ilce_score)
     
     # SKOR HESAPLAMA
     if urun.get("yeni_mi", "eski") == "yeni":
-        # Yeni ürün: Satış %50 + KS Ciro %25 + Üst Mal %5 + Mal %10 + İlçe %5 - Stok %30
+        # Yeni ürün
         weights = {
-            "satis_4hafta": 0.50,
+            "toplam_satis_gucu": 0.50,  # Toplam satış gücü (4 hafta + ara)
             "ks_ciro": 0.25,
             "ust_mal_grubu_ciro": 0.05,
             "mal_grubu_ciro": 0.10,
             "hangi_ilce_score": 0.05
         }
     else:
-        # Eski ürün: Satış %50 + KS Ciro %25 + İlçe %5 - Stok %30
+        # Eski ürün
         weights = {
-            "satis_4hafta": 0.50,
+            "toplam_satis_gucu": 0.50,  # Toplam satış gücü (4 hafta + ara)
             "ks_ciro": 0.25,
             "hangi_ilce_score": 0.05
         }
@@ -246,12 +350,32 @@ def calculate_kasa_aktivitesi(tables, urun):
     weights = {k: v / total_weight for k, v in weights.items()}
     
     # Skor hesapla
-    skor = pd.Series([0.0]*len(dagitim_verileri))
+    skor = pd.Series([0.0]*len(dagitim_verileri), index=dagitim_verileri.index)
     for col, weight in weights.items():
         if col in dagitim_verileri.columns:
             skor += normalize_column(dagitim_verileri, col) * weight
     
-    # Stok cezası (-%30)
+    # STOK TÜKENME BONUSU (+%15)
+    stok_tukendi = (dagitim_verileri["stok"] == 0) & (dagitim_verileri["ara_satis"] > 0)
+    dagitim_verileri["stok_tukendi_bonus"] = stok_tukendi.astype(float) * 0.15
+    skor += dagitim_verileri["stok_tukendi_bonus"]
+    
+    # DURGUNLUK CEZASI (-%10)
+    durgun = (dagitim_verileri["ara_satis"] == 0) & (dagitim_verileri["stok"] > 0)
+    if "stok_4hafta_sonunda" in dagitim_verileri.columns:
+        dagitim_verileri["birikim_orani"] = dagitim_verileri.apply(
+            lambda x: (x["stok"] / x["stok_4hafta_sonunda"]) if x["stok_4hafta_sonunda"] > 0 else 0,
+            axis=1
+        )
+    else:
+        dagitim_verileri["birikim_orani"] = 0
+    
+    dagitim_verileri["durgunluk_cezasi"] = (
+        durgun.astype(float) * dagitim_verileri["birikim_orani"] * 0.10
+    )
+    skor -= dagitim_verileri["durgunluk_cezasi"]
+    
+    # Stok oranı cezası (mevcut - %30)
     skor -= dagitim_verileri["stok_orani"] * 0.30
     
     dagitim_verileri["skor"] = skor.clip(lower=0)
@@ -292,11 +416,16 @@ def calculate_kasa_aktivitesi(tables, urun):
     # Sütun sıralaması
     column_order = [
         "magaza_kodu", "magaza_adi", "urun_kodu", "urun_adi", "dagitilan_koli", "skor",
-        "stok", "satis_4hafta", "ks_ciro", "hangi_ilce", "hangi_ilce_score", "stok_orani"
+        "stok", "satis_4hafta", "ara_satis", "toplam_satis_gucu", "ks_ciro", 
+        "hangi_ilce", "hangi_ilce_score", "stok_orani", "stok_tukendi_bonus", 
+        "durgunluk_cezasi", "birikim_orani"
     ]
     
     if urun.get("yeni_mi", "eski") == "yeni":
         column_order.extend(["mal_grubu", "mal_grubu_ciro", "ust_mal_grubu", "ust_mal_grubu_ciro"])
+    
+    if "stok_4hafta_sonunda" in dagitim_verileri.columns:
+        column_order.append("stok_4hafta_sonunda")
     
     available_columns = [col for col in column_order if col in dagitim_verileri.columns]
     
@@ -431,11 +560,14 @@ if urun_bilgisi_dosyasi and not missing_tables:
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 birlesmis.to_excel(writer, index=False, sheet_name='Dağıtım Planı')
             
+            output.seek(0)  # Dosya başına dön
+            
             st.download_button(
-                "📥 Excel Dosyasını İndir",
-                output.getvalue(),
-                f"dagitim_plani_{kategori.lower().replace(' ', '_')}.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                label="📥 Excel Dosyasını İndir (.xlsx)",
+                data=output.getvalue(),
+                file_name=f"dagitim_plani_{kategori.lower().replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
             
             st.success("✅ Dağıtım planı başarıyla oluşturuldu!")
