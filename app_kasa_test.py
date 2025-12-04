@@ -192,9 +192,9 @@ def calculate_kasa_aktivitesi(tables, urun):
     
     # Ürün bilgilerini ekle
     dagitim_verileri["urun_kodu"] = urun["urun_kodu"]
-    dagitim_verileri["urun_adi"] = urun["urun_adi"]
+    dagitim_verileri["urun_adi"] = urun.get("urun_adi", "")
     dagitim_verileri["ust_mal_grubu"] = urun.get("ust_mal_grubu", "")
-    dagitim_verileri["mal_grubu"] = urun.get("mal_grubu", "")
+    dagitim_verileri["mal_grubu"] = urun.get("mal_grubu", urun.get("urun_grubu", ""))
     
     # Stok-Satış tablosunu birleştir
     if "KS Stok Satış" in tables and tables["KS Stok Satış"] is not None:
