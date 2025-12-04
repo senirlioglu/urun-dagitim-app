@@ -174,24 +174,59 @@ def calculate_kasa_aktivitesi(tables, urun):
     dagitim_verileri["ust_mal_grubu"] = urun.get("ust_mal_grubu", "")
     dagitim_verileri["mal_grubu"] = urun.get("mal_grubu", "")
     
+    # DEBUG
+    st.write("🔍 DEBUG")
+    st.write("- Stok-Satış Sütunları:", list(tables["KS Stok Satış"].columns))
+    st.write("- Aranan Ürün Kodu:", urun["urun_kodu"])
+    st.write("- Tablodaki İlk 5 Ürün Kodu:", tables["KS Stok Satış"]["urun_kodu"].head(5).tolist())
+    st.write("- Mağaza Bilgi Satır:", len(dagitim_verileri))
+    
     # Stok-Satış birleştir
     if "KS Stok Satış" in tables and tables["KS Stok Satış"] is not None:
         required_cols = ["magaza_kodu", "urun_kodu", "stok", "satis_4hafta", "stok_4hafta_sonunda"]
         available_cols = [col for col in required_cols if col in tables["KS Stok Satış"].columns]
+        
+        st.write("- Mevcut Sütunlar:", available_cols)
+        
+        if len(available_cols) < 3:
+            st.error("❌ Stok-Satış tablosunda gerekli sütunlar eksik!")
+            st.write("Gerekli: magaza_kodu, urun_kodu, stok, satis_4hafta")
+            return pd.DataFrame()
+        
         stok_satis = tables["KS Stok Satış"][available_cols].copy()
+        
+        st.write("- Merge öncesi Dagitim satır:", len(dagitim_verileri))
         
         dagitim_verileri = dagitim_verileri.merge(stok_satis, on=["magaza_kodu", "urun_kodu"], how="left")
         
+        st.write("- Merge sonrası Dagitim satır:", len(dagitim_verileri))
+        st.write("- Stok sütunu var mı?", "stok" in dagitim_verileri.columns)
+        
+        if "stok" in dagitim_verileri.columns:
+            st.write("- Stok dolu satır:", dagitim_verileri["stok"].notna().sum())
+        
         # Eşleşme yoksa prefix ile dene
-        if dagitim_verileri["stok"].isna().all():
+        if "stok" not in dagitim_verileri.columns or dagitim_verileri["stok"].isna().all():
+            st.warning("⚠️ Tam eşleşme yok, prefix deneniyor...")
+            
             dagitim_verileri = dagitim_verileri.drop(columns=[c for c in available_cols if c not in ["magaza_kodu", "urun_kodu"]], errors='ignore')
             dagitim_verileri["urun_prefix"] = dagitim_verileri["urun_kodu"].astype(str).str[:8]
             stok_satis["urun_prefix"] = stok_satis["urun_kodu"].astype(str).str[:8]
             
+            st.write("- Dagitim prefix örnek:", dagitim_verileri["urun_prefix"].iloc[0])
+            st.write("- Stok-Satış prefix örnekleri:", stok_satis["urun_prefix"].head(3).tolist())
+            
             agg_dict = {col: "sum" for col in available_cols if col not in ["magaza_kodu", "urun_kodu"]}
             stok_grouped = stok_satis.groupby(["magaza_kodu", "urun_prefix"]).agg(agg_dict).reset_index()
+            
+            st.write("- Grouped satır sayısı:", len(stok_grouped))
+            
             dagitim_verileri = dagitim_verileri.merge(stok_grouped, on=["magaza_kodu", "urun_prefix"], how="left")
             dagitim_verileri.drop(columns=["urun_prefix"], inplace=True, errors='ignore')
+            
+            st.write("- Prefix merge sonrası stok var mı?", "stok" in dagitim_verileri.columns)
+            if "stok" in dagitim_verileri.columns:
+                st.write("- Stok dolu satır:", dagitim_verileri["stok"].notna().sum())
     
     # KS Ciro
     if "KS Ciro" in tables and tables["KS Ciro"] is not None:
