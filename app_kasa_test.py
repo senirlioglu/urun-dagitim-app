@@ -45,7 +45,7 @@ def unify_column_names(df):
         '2_haftalik_satis': 'satis_2hafta',
         'kasa_aktivitesi_ciro': 'ks_ciro',
         '4_hafta_sonunda_stok': 'stok_4hafta_sonunda',
-        'guncel_stok': 'guncel_stok',
+        'guncel_stok': 'stok',  # ÖNEMLİ: guncel_stok → stok
         'depolama': 'depolama_kosulu'
     }
     
