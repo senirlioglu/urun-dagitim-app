@@ -1,4 +1,5 @@
-import streamlit as st
+# Stok-Satış tablosunu birleştir
+    if "KS Stok Satış" in tables and tables["KS Stok Satış"] isimport streamlit as st
 import pandas as pd
 import io
 from math import floor
