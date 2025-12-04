@@ -436,7 +436,7 @@ st.markdown("---")
 
 # Kategori Seçimi
 kategori = st.selectbox(
-    "📂 Dağıtım Kategorisi Seçin",
+    "📂 Kategori",
     ["Grup Spot", "Kasa Aktivitesi"],
     help="Hangi kategori için dağıtım planı oluşturacaksınız?"
 )
@@ -444,23 +444,46 @@ kategori = st.selectbox(
 st.markdown("---")
 
 # Dosya Yükleme Alanları
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("📥 Gerekli Dosyalar")
-    urun_bilgisi_dosyasi = st.file_uploader(
-        f"{'GS' if kategori == 'Grup Spot' else 'KS'} Ürün Bilgisi Dosyası",
-        type=["xlsx"],
-        key="urun_bilgi"
-    )
-
-with col2:
-    st.subheader("📥 Opsiyonel Dosyalar")
-    stok_satis_file = st.file_uploader(
-        f"Güncel {'GS' if kategori == 'Grup Spot' else 'KS'} Stok-Satış Tablosu",
-        type=["xlsx"],
-        key="stok_satis"
-    )
+if kategori == "Kasa Aktivitesi":
+    st.subheader("📥 Dosya Yükleme")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        urun_bilgisi_dosyasi = st.file_uploader(
+            "1️⃣ Ürün Bilgisi",
+            type=["xlsx"],
+            key="urun_bilgi",
+            help="Dağıtılacak ürünlerin listesi"
+        )
+    
+    with col2:
+        stok_satis_file = st.file_uploader(
+            "2️⃣ Stok-Satış Tablosu",
+            type=["xlsx"],
+            key="stok_satis",
+            help="Güncel stok ve satış verileri (ZORUNLU)"
+        )
+else:  # Grup Spot
+    st.subheader("📥 Dosya Yükleme")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        urun_bilgisi_dosyasi = st.file_uploader(
+            "1️⃣ Ürün Bilgisi",
+            type=["xlsx"],
+            key="urun_bilgi",
+            help="Dağıtılacak ürünlerin listesi"
+        )
+    
+    with col2:
+        stok_satis_file = st.file_uploader(
+            "2️⃣ Güncel Stok-Satış (Opsiyonel)",
+            type=["xlsx"],
+            key="stok_satis",
+            help="Varsa güncel stok-satış verilerini yükleyin"
+        )
 
 # Tablo yükleme
 if kategori == "Grup Spot":
@@ -472,12 +495,17 @@ if kategori == "Grup Spot":
         "Stok Satış Tablosu": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("stok_satis_tablosu.xlsx")
     }
 else:  # Kasa Aktivitesi
+    # Kasa Aktivitesi için stok-satış dosyası ZORUNLU
+    if not stok_satis_file:
+        st.warning("⚠️ Kasa Aktivitesi için **Stok-Satış Tablosu** zorunludur. Lütfen dosyayı yükleyin.")
+        st.stop()
+    
     tables = {
         "KS Mağaza Bilgi": load_local_excel("magaza_bilgi_tablosu.xlsx"),
         "KS Ciro": load_local_excel("ks_ciro.xlsx"),
         "KS Mal Grubu": load_local_excel("ks_mal.xlsx"),
         "KS Üst Mal Grubu": load_local_excel("ks_ust_mal.xlsx"),
-        "KS Stok Satış": normalize_columns(pd.read_excel(stok_satis_file)) if stok_satis_file else load_local_excel("ks_stok_satis.xlsx")
+        "KS Stok Satış": normalize_columns(pd.read_excel(stok_satis_file))
     }
     
     # Sütun isimlerini birleştir
@@ -485,13 +513,13 @@ else:  # Kasa Aktivitesi
         if tables[key] is not None:
             tables[key] = unify_column_names(tables[key])
 
-# Eksik tabloları kontrol et
+# Eksik tabloları kontrol et (sadece None olanları say)
 missing_tables = [name for name, table in tables.items() if table is None]
 if missing_tables:
-    st.error(f"❌ Eksik tablolar: {', '.join(missing_tables)}")
-    st.info("💡 Lütfen tüm gerekli Excel dosyalarını aynı klasöre yerleştirin.")
+    st.error(f"❌ Sunucuda eksik tablolar: {', '.join(missing_tables)}")
+    st.info("💡 Bu tablolar sunucuda olmalı. Yöneticinizle iletişime geçin.")
 else:
-    st.success(f"✅ Tüm tablolar yüklendi ({kategori})")
+    st.success(f"✅ Sistem tabloları hazır")
     
     # Debug: Tablo bilgilerini göster
     with st.expander("🔍 Yüklenen Tablo Detayları (Debug)"):
