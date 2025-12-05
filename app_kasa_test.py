@@ -295,20 +295,21 @@ def calculate_kasa_aktivitesi(tables, urun):
         base_minimum = 2
         st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 2 koli (Az)")
     
-    # ESKİ ÜRÜNLERDE STOK KONTROLÜ (Aylık Stok Mantığı)
+    # ESKİ ÜRÜNLERDE: Top 40 belirleme SONRASI stok kontrolü
     if urun.get("yeni_mi", "eski") == "eski":
-        st.info("🔍 Eski ürün - Stok kontrolü yapılıyor...")
+        st.info("🔍 Eski ürün - Minimum ayarlanıyor...")
         
-        # Aylık stok hesapla (4 haftalık satış = 1 ay)
+        # Aylık stok hesapla (referans için)
         dagitim_verileri["aylik_stok"] = dagitim_verileri["stok"] / (dagitim_verileri["satis_4hafta"] + 1)
         
-        # Minimum'u stok durumuna göre ayarla
+        # Başlangıç: Herkese base minimum
         dagitim_verileri["minimum_koli"] = base_minimum
         
-        # Top 40 mağazalar: Minimum = 0 (öncelik!)
+        # 1. ÖNCE: Top 40 mağazalar minimum almaz
         dagitim_verileri.loc[top_40_magazalar, "minimum_koli"] = 0
+        st.write(f"  ✅ Top 40 mağaza: Minimum = 0 (skor bazlı)")
         
-        # Diğer mağazalarda stok kontrolü:
+        # 2. SONRA: Diğer mağazalarda stok kontrolü
         diger_magazalar = ~dagitim_verileri["top_40"]
         
         # 2 aydan fazla stoğu olanlar: Minimum = 0
@@ -321,23 +322,28 @@ def calculate_kasa_aktivitesi(tables, urun):
         
         # 1 aydan az stoğu olanlar: Minimum = tam (zaten base_minimum)
         
-        stok_kontrol_ozet = dagitim_verileri.groupby(["top_40", "minimum_koli"]).size().reset_index(name="count")
-        st.write("📊 Stok Kontrolü Sonuçları:")
-        for _, row in stok_kontrol_ozet.iterrows():
-            tip = "Top 40" if row["top_40"] else "Diğer"
-            st.write(f"  - {tip}: {row['count']} mağaza → {int(row['minimum_koli'])} koli minimum")
+        # Özet rapor
+        st.write("📊 Minimum Dağılımı (Eski Ürün):")
+        summary = dagitim_verileri.groupby("minimum_koli").size().sort_index(ascending=False)
+        for min_val, count in summary.items():
+            if min_val == 0:
+                top40_count = dagitim_verileri[dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
+                stok_count = dagitim_verileri[~dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
+                st.write(f"  - 0 koli: {count} mağaza (Top 40: {top40_count}, Stoklu: {stok_count})")
+            else:
+                st.write(f"  - {int(min_val)} koli: {count} mağaza")
         
         minimum_total = dagitim_verileri["minimum_koli"].sum()
         
     else:
-        # YENİ ÜRÜNLERDE: Top 40 → 0, Diğerleri → base_minimum
-        st.info("🆕 Yeni ürün - Top 40 mağaza minimum almıyor")
+        # YENİ ÜRÜNLERDE: Sadece Top 40 ayrımı
+        st.info("🆕 Yeni ürün - Top 40 minimum almıyor")
         dagitim_verileri["minimum_koli"] = base_minimum
         dagitim_verileri.loc[top_40_magazalar, "minimum_koli"] = 0
         
-        st.write("📊 Minimum Dağılımı:")
-        st.write(f"  - Top 40: 40 mağaza → 0 koli minimum")
-        st.write(f"  - Diğer: 164 mağaza → {base_minimum} koli minimum")
+        st.write("📊 Minimum Dağılımı (Yeni Ürün):")
+        st.write(f"  - 0 koli: 40 mağaza (Top 40)")
+        st.write(f"  - {base_minimum} koli: 164 mağaza (Diğer)")
         
         minimum_total = 164 * base_minimum
     
