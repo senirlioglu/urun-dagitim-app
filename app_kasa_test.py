@@ -349,7 +349,7 @@ def calculate_kasa_aktivitesi(tables, urun):
         
         # 1-2 ay arası stoğu olanlar: Minimum = yarım
         orta_stoklu = (dagitim_verileri["aylik_stok"] >= 1.0) & (dagitim_verileri["aylik_stok"] < 2.0)
-        dagitim_verileri.loc[orta_stoklu, "minimum_koli"] = (base_minimum / 2).astype(int)
+        dagitim_verileri.loc[orta_stoklu, "minimum_koli"] = int(base_minimum / 2)
         
         # 1 aydan az stoğu olanlar: Minimum = tam (zaten base_minimum)
         
