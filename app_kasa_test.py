@@ -333,4 +333,16 @@ if urun_bilgisi_dosyasi and not missing_tables:
                 st.metric("Ürün", birlesmis["urun_kodu"].nunique())
             with col3:
                 st.metric("Koli", int(birlesmis["dagitilan_koli"].sum()))
-            with st.expander("
+            with st.expander("📋 Detaylar", expanded=True):
+                st.dataframe(birlesmis.head(50), use_container_width=True)
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                birlesmis.to_excel(writer, index=False, sheet_name='Dağıtım')
+            output.seek(0)
+            st.download_button("📥 Excel İndir", output.getvalue(), f"dagitim_{kategori.replace(' ', '_')}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.success("✅ Hazır!")
+else:
+    if urun_bilgisi_dosyasi:
+        st.info("⏳ Kontrol...")
+    else:
+        st.info("👆 Dosya yükleyin")
