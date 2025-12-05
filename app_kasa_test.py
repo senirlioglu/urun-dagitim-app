@@ -45,7 +45,7 @@ def unify_column_names(df):
         '2_haftalik_satis': 'satis_2hafta',
         'kasa_aktivitesi_ciro': 'ks_ciro',
         '4_hafta_sonunda_stok': 'stok_4hafta_sonunda',
-        'guncel_stok': 'stok',  # ÖNEMLİ: guncel_stok → stok
+        'guncel_stok': 'stok',
         'depolama': 'depolama_kosulu'
     }
     
@@ -179,16 +179,20 @@ def calculate_kasa_aktivitesi(tables, urun):
         required_cols = ["magaza_kodu", "urun_kodu", "stok", "satis_4hafta", "stok_4hafta_sonunda"]
         available_cols = [col for col in required_cols if col in tables["KS Stok Satış"].columns]
         
-        if len(available_cols) < 3:
-            st.error("❌ Stok-Satış tablosunda gerekli sütunlar eksik!")
-            return pd.DataFrame()
-        
-        stok_satis = tables["KS Stok Satış"][available_cols].copy()
-        
-        dagitim_verileri = dagitim_verileri.merge(stok_satis, on=["magaza_kodu", "urun_kodu"], how="left")
-        
-        # Eşleşme yoksa prefix ile dene
-        if "stok" not in dagitim_verileri.columns or dagitim_verileri["stok"].isna().all():
+        if len(available_cols) >= 3:
+            stok_satis = tables["KS Stok Satış"][available_cols].copy()
+            dagitim_verileri = dagitim_verileri.merge(stok_satis, on=["magaza_kodu", "urun_kodu"], how="left")
+            
+            # Eşleşme yoksa prefix ile dene
+            if "stok" not in dagitim_verileri.columns or dagitim_verileri["stok"].isna().all():
+                dagitim_verileri = dagitim_verileri.drop(columns=[c for c in available_cols if c not in ["magaza_kodu", "urun_kodu"]], errors='ignore')
+                dagitim_verileri["urun_prefix"] = dagitim_verileri["urun_kodu"].astype(str).str[:8]
+                stok_satis["urun_prefix"] = stok_satis["urun_kodu"].astype(str).str[:8]
+                
+                agg_dict = {col: "sum" for col in available_cols if col not in ["magaza_kodu", "urun_kodu"]}
+                stok_grouped = stok_satis.groupby(["magaza_kodu", "urun_prefix"]).agg(agg_dict).reset_index()
+                dagitim_verileri = dagitim_verileri.merge(stok_grouped, on=["magaza_kodu", "urun_prefix"], how="left")
+                dagitim_verileri.drop(columns=["urun_prefix"], inplace=True, errors='ignore')
     
     # KS Ciro
     if "KS Ciro" in tables and tables["KS Ciro"] is not None:
@@ -218,7 +222,7 @@ def calculate_kasa_aktivitesi(tables, urun):
     if "stok_4hafta_sonunda" in dagitim_verileri.columns:
         dagitim_verileri["stok_4hafta_sonunda"] = dagitim_verileri["stok_4hafta_sonunda"].clip(lower=0)
     
-    # ARA SATIŞ HESAPLAMA
+    # ARA SATIŞ
     if "stok_4hafta_sonunda" in dagitim_verileri.columns:
         dagitim_verileri["ara_satis"] = (dagitim_verileri["stok_4hafta_sonunda"] - dagitim_verileri["stok"]).clip(lower=0)
     else:
@@ -233,7 +237,9 @@ def calculate_kasa_aktivitesi(tables, urun):
     # İlçe skoru
     dagitim_verileri["hangi_ilce_score"] = dagitim_verileri["hangi_ilce"].apply(map_hangi_ilce_score)
     
-    # SKOR
+    # ÖN-SKOR (Top 40 için)
+    st.info("🔍 Ön-skor hesaplanıyor (Top 40 belirleme)...")
+    
     if urun.get("yeni_mi", "eski") == "yeni":
         weights = {
             "toplam_satis_gucu": 0.50,
@@ -252,112 +258,103 @@ def calculate_kasa_aktivitesi(tables, urun):
     total_weight = sum(weights.values())
     weights = {k: v / total_weight for k, v in weights.items()}
     
-    skor = pd.Series([0.0]*len(dagitim_verileri), index=dagitim_verileri.index)
+    on_skor = pd.Series([0.0]*len(dagitim_verileri), index=dagitim_verileri.index)
     for col, weight in weights.items():
         if col in dagitim_verileri.columns:
-            skor += normalize_column(dagitim_verileri, col) * weight
+            on_skor += normalize_column(dagitim_verileri, col) * weight
     
-    # Stok tükenme bonusu
+    # Bonuslar ve cezalar
     stok_tukendi = (dagitim_verileri["stok"] == 0) & (dagitim_verileri["ara_satis"] > 0)
-    skor += stok_tukendi.astype(float) * 0.15
+    on_skor += stok_tukendi.astype(float) * 0.15
     
-    # Durgunluk cezası
     durgun = (dagitim_verileri["ara_satis"] == 0) & (dagitim_verileri["stok"] > 0)
     if "stok_4hafta_sonunda" in dagitim_verileri.columns:
         birikim = dagitim_verileri.apply(
             lambda x: (x["stok"] / x["stok_4hafta_sonunda"]) if x["stok_4hafta_sonunda"] > 0 else 0, axis=1
         )
-        skor -= durgun.astype(float) * birikim * 0.10
+        on_skor -= durgun.astype(float) * birikim * 0.10
     
-    # Stok oranı cezası
-    skor -= dagitim_verileri["stok_orani"] * 0.30
+    on_skor -= dagitim_verileri["stok_orani"] * 0.30
+    dagitim_verileri["on_skor"] = on_skor.clip(lower=0)
     
-    dagitim_verileri["skor"] = skor.clip(lower=0)
+    # TOP 40 BELİRLE
+    top_40_magazalar = dagitim_verileri.nlargest(40, "on_skor").index
+    dagitim_verileri["top_40"] = False
+    dagitim_verileri.loc[top_40_magazalar, "top_40"] = True
     
-    # DAĞITIM - DİNAMİK MİNİMUM (HİBRİT)
+    st.success("✅ Top 40 mağaza belirlendi")
+    
+    dagitim_verileri["skor"] = on_skor
+    
+    # DAĞITIM - DİNAMİK MİNİMUM
     total_koli = urun["dagitilacak_koli"]
     magaza_sayisi = len(dagitim_verileri)
-    
-    # Ortalama koli/mağaza hesapla
     koli_per_magaza = total_koli / magaza_sayisi
     
-    # Dinamik minimum belirleme (Hibrit: 2-3-4-5)
     if koli_per_magaza >= 15:
         base_minimum = 5
-        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 5 koli (Çok Bol)")
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Min: 5")
     elif koli_per_magaza >= 10:
         base_minimum = 4
-        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 4 koli (Bol)")
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Min: 4")
     elif koli_per_magaza >= 5:
         base_minimum = 3
-        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 3 koli (Orta)")
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Min: 3")
     else:
         base_minimum = 2
-        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 2 koli (Az)")
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Min: 2")
     
-    # ESKİ ÜRÜNLERDE: Top 40 belirleme SONRASI stok kontrolü
+    # ESKİ ÜRÜN: Top 40 → Stok kontrolü → Minimum
     if urun.get("yeni_mi", "eski") == "eski":
         st.info("🔍 Eski ürün - Minimum ayarlanıyor...")
         
-        # Aylık stok hesapla (referans için)
         dagitim_verileri["aylik_stok"] = dagitim_verileri["stok"] / (dagitim_verileri["satis_4hafta"] + 1)
-        
-        # Başlangıç: Herkese base minimum
         dagitim_verileri["minimum_koli"] = base_minimum
         
-        # 1. ÖNCE: Top 40 mağazalar minimum almaz
+        # Top 40: Minimum = 0
         dagitim_verileri.loc[top_40_magazalar, "minimum_koli"] = 0
-        st.write(f"  ✅ Top 40 mağaza: Minimum = 0 (skor bazlı)")
+        st.write("  ✅ Top 40: Minimum = 0")
         
-        # 2. SONRA: Diğer mağazalarda stok kontrolü
-        diger_magazalar = ~dagitim_verileri["top_40"]
+        # Diğerlerde stok kontrolü
+        diger = ~dagitim_verileri["top_40"]
         
-        # 2 aydan fazla stoğu olanlar: Minimum = 0
-        cok_stoklu = diger_magazalar & (dagitim_verileri["aylik_stok"] >= 2.0)
+        cok_stoklu = diger & (dagitim_verileri["aylik_stok"] >= 2.0)
         dagitim_verileri.loc[cok_stoklu, "minimum_koli"] = 0
         
-        # 1-2 ay arası stoğu olanlar: Minimum = yarım
-        orta_stoklu = diger_magazalar & (dagitim_verileri["aylik_stok"] >= 1.0) & (dagitim_verileri["aylik_stok"] < 2.0)
+        orta_stoklu = diger & (dagitim_verileri["aylik_stok"] >= 1.0) & (dagitim_verileri["aylik_stok"] < 2.0)
         dagitim_verileri.loc[orta_stoklu, "minimum_koli"] = int(base_minimum / 2)
         
-        # 1 aydan az stoğu olanlar: Minimum = tam (zaten base_minimum)
-        
-        # Özet rapor
-        st.write("📊 Minimum Dağılımı (Eski Ürün):")
+        st.write("📊 Minimum Dağılımı:")
         summary = dagitim_verileri.groupby("minimum_koli").size().sort_index(ascending=False)
         for min_val, count in summary.items():
             if min_val == 0:
-                top40_count = dagitim_verileri[dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
-                stok_count = dagitim_verileri[~dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
-                st.write(f"  - 0 koli: {count} mağaza (Top 40: {top40_count}, Stoklu: {stok_count})")
+                top40_c = dagitim_verileri[dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
+                stok_c = dagitim_verileri[~dagitim_verileri["top_40"] & (dagitim_verileri["minimum_koli"] == 0)].shape[0]
+                st.write(f"  - 0 koli: {count} mağaza (Top 40: {top40_c}, Stoklu: {stok_c})")
             else:
                 st.write(f"  - {int(min_val)} koli: {count} mağaza")
         
         minimum_total = dagitim_verileri["minimum_koli"].sum()
         
     else:
-        # YENİ ÜRÜNLERDE: Sadece Top 40 ayrımı
+        # YENİ ÜRÜN: Top 40 → 0, Diğer → base
         st.info("🆕 Yeni ürün - Top 40 minimum almıyor")
         dagitim_verileri["minimum_koli"] = base_minimum
         dagitim_verileri.loc[top_40_magazalar, "minimum_koli"] = 0
         
-        st.write("📊 Minimum Dağılımı (Yeni Ürün):")
-        st.write(f"  - 0 koli: 40 mağaza (Top 40)")
-        st.write(f"  - {base_minimum} koli: 164 mağaza (Diğer)")
+        st.write("📊 Minimum:")
+        st.write(f"  - 0 koli: 40 (Top 40)")
+        st.write(f"  - {base_minimum} koli: 164 (Diğer)")
         
         minimum_total = 164 * base_minimum
     
     # Yetersiz koli kontrolü
     if total_koli < minimum_total:
-        st.warning(f"⚠️ Toplam koli ({total_koli}) yetersiz. Minimum dağıtım için {minimum_total} koli gerekli.")
-        st.info("💡 Minimum'lar oranla azaltılıyor...")
-        
-        # Oranla azalt
-        azaltma_orani = total_koli / minimum_total
-        dagitim_verileri["minimum_koli"] = (dagitim_verileri["minimum_koli"] * azaltma_orani).apply(floor)
+        st.warning(f"⚠️ Yetersiz koli. Minimum'lar azaltılıyor...")
+        azaltma = total_koli / minimum_total
+        dagitim_verileri["minimum_koli"] = (dagitim_verileri["minimum_koli"] * azaltma).apply(floor)
         minimum_total = dagitim_verileri["minimum_koli"].sum()
     
-    # Minimum dağıtımı yap
     dagitim_verileri["dagitilan_koli"] = dagitim_verileri["minimum_koli"]
     kalan_koli = total_koli - minimum_total
     
@@ -435,84 +432,4 @@ else:
         "KS Ciro": load_local_excel("ks_ciro.xlsx"),
         "KS Mal Grubu": load_local_excel("ks_mal.xlsx"),
         "KS Üst Mal Grubu": load_local_excel("ks_ust_mal.xlsx"),
-        "KS Stok Satış": unify_column_names(normalize_columns(pd.read_excel(stok_satis_file)))
-    }
-    
-    for key in ["KS Mağaza Bilgi", "KS Ciro", "KS Mal Grubu", "KS Üst Mal Grubu"]:
-        if tables[key] is not None:
-            tables[key] = unify_column_names(tables[key])
-
-missing_tables = [name for name, table in tables.items() if table is None]
-if missing_tables:
-    st.error(f"❌ Sunucuda eksik: {', '.join(missing_tables)}")
-else:
-    st.success("✅ Sistem hazır")
-
-if urun_bilgisi_dosyasi and not missing_tables:
-    urun_bilgisi = unify_column_names(normalize_columns(pd.read_excel(urun_bilgisi_dosyasi)))
-    
-    st.success(f"✅ {len(urun_bilgisi)} ürün yüklendi")
-    
-    with st.expander("👁️ Ürün Listesi"):
-        st.dataframe(urun_bilgisi.head(10), use_container_width=True)
-    
-    st.markdown("---")
-    
-    if st.button("🚀 Dağıtımı Hesapla", type="primary", use_container_width=True):
-        with st.spinner("Hesaplanıyor..."):
-            dagitim_planlari = []
-            progress_bar = st.progress(0)
-            
-            for idx, (_, urun) in enumerate(urun_bilgisi.iterrows()):
-                try:
-                    if kategori == "Grup Spot":
-                        plan = calculate_distribution_plan(tables, urun)
-                    else:
-                        plan = calculate_kasa_aktivitesi(tables, urun)
-                    
-                    if plan is not None and not plan.empty:
-                        dagitim_planlari.append(plan)
-                except Exception as e:
-                    st.error(f"❌ Hata (Ürün {idx+1}): {str(e)}")
-                
-                progress_bar.progress((idx + 1) / len(urun_bilgisi))
-            
-            progress_bar.empty()
-            
-            if not dagitim_planlari:
-                st.error("❌ Dağıtım oluşturulamadı.")
-                st.stop()
-            
-            birlesmis = pd.concat(dagitim_planlari, ignore_index=True)
-            
-            st.markdown("### 📊 Özet")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Mağaza", birlesmis["magaza_kodu"].nunique())
-            with col2:
-                st.metric("Ürün", birlesmis["urun_kodu"].nunique())
-            with col3:
-                st.metric("Toplam Koli", int(birlesmis["dagitilan_koli"].sum()))
-            
-            with st.expander("📋 Detaylar (İlk 50)", expanded=True):
-                st.dataframe(birlesmis.head(50), use_container_width=True)
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                birlesmis.to_excel(writer, index=False, sheet_name='Dağıtım')
-            
-            output.seek(0)
-            
-            st.download_button(
-                label="📥 Excel İndir (.xlsx)",
-                data=output.getvalue(),
-                file_name=f"dagitim_{kategori.lower().replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            
-            st.success("✅ Hazır!")
-elif urun_bilgisi_dosyasi:
-    st.info("⏳ Kontrol ediliyor...")
-else:
-    st.info("👆 Dosyaları yükleyin")
+        "KS Stok Satış": unify_column_names(normalize_columns(pd.read_excel(stok
