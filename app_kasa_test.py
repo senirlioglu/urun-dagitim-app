@@ -312,18 +312,73 @@ def calculate_kasa_aktivitesi(tables, urun):
     
     dagitim_verileri["skor"] = skor.clip(lower=0)
     
-    # DAĞITIM
+    # DAĞITIM - DİNAMİK MİNİMUM (HİBRİT)
     total_koli = urun["dagitilacak_koli"]
     magaza_sayisi = len(dagitim_verileri)
-    minimum_koli = 2
-    minimum_total = magaza_sayisi * minimum_koli
     
+    # Ortalama koli/mağaza hesapla
+    koli_per_magaza = total_koli / magaza_sayisi
+    
+    # Dinamik minimum belirleme (Hibrit: 2-3-4-5)
+    if koli_per_magaza >= 15:
+        base_minimum = 5
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 5 koli (Çok Bol)")
+    elif koli_per_magaza >= 10:
+        base_minimum = 4
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 4 koli (Bol)")
+    elif koli_per_magaza >= 5:
+        base_minimum = 3
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 3 koli (Orta)")
+    else:
+        base_minimum = 2
+        st.info(f"ℹ️ Ortalama {koli_per_magaza:.1f} koli/mağaza → Base Minimum: 2 koli (Az)")
+    
+    # ESKİ ÜRÜNLERDE STOK KONTROLÜ (Aylık Stok Mantığı)
+    if urun.get("yeni_mi", "eski") == "eski":
+        st.info("🔍 Eski ürün - Stok kontrolü yapılıyor...")
+        
+        # Aylık stok hesapla (4 haftalık satış = 1 ay)
+        dagitim_verileri["aylik_stok"] = dagitim_verileri["stok"] / (dagitim_verileri["satis_4hafta"] + 1)
+        
+        # Minimum'u stok durumuna göre ayarla
+        dagitim_verileri["minimum_koli"] = base_minimum
+        
+        # 2 aydan fazla stoğu olanlar: Minimum = 0
+        cok_stoklu = dagitim_verileri["aylik_stok"] >= 2.0
+        dagitim_verileri.loc[cok_stoklu, "minimum_koli"] = 0
+        
+        # 1-2 ay arası stoğu olanlar: Minimum = yarım
+        orta_stoklu = (dagitim_verileri["aylik_stok"] >= 1.0) & (dagitim_verileri["aylik_stok"] < 2.0)
+        dagitim_verileri.loc[orta_stoklu, "minimum_koli"] = (base_minimum / 2).astype(int)
+        
+        # 1 aydan az stoğu olanlar: Minimum = tam (zaten base_minimum)
+        
+        stok_kontrol_ozet = dagitim_verileri.groupby("minimum_koli").size()
+        st.write("📊 Stok Kontrolü Sonuçları:")
+        for min_val, count in stok_kontrol_ozet.items():
+            st.write(f"  - {count} mağaza: {int(min_val)} koli minimum")
+        
+        # Her mağazanın kendi minimum'unu kullan
+        minimum_total = dagitim_verileri["minimum_koli"].sum()
+        
+    else:
+        # YENİ ÜRÜNLERDE stok kontrolü yok, herkese aynı
+        st.info("🆕 Yeni ürün - Tüm mağazalara eşit minimum")
+        dagitim_verileri["minimum_koli"] = base_minimum
+        minimum_total = magaza_sayisi * base_minimum
+    
+    # Yetersiz koli kontrolü
     if total_koli < minimum_total:
-        st.warning(f"⚠️ Toplam koli ({total_koli}) yetersiz. En az {minimum_total} koli gerekli.")
-        dagitim_verileri["dagitilan_koli"] = 0
-        return dagitim_verileri
+        st.warning(f"⚠️ Toplam koli ({total_koli}) yetersiz. Minimum dağıtım için {minimum_total} koli gerekli.")
+        st.info("💡 Minimum'lar oranla azaltılıyor...")
+        
+        # Oranla azalt
+        azaltma_orani = total_koli / minimum_total
+        dagitim_verileri["minimum_koli"] = (dagitim_verileri["minimum_koli"] * azaltma_orani).apply(floor)
+        minimum_total = dagitim_verileri["minimum_koli"].sum()
     
-    dagitim_verileri["dagitilan_koli"] = minimum_koli
+    # Minimum dağıtımı yap
+    dagitim_verileri["dagitilan_koli"] = dagitim_verileri["minimum_koli"]
     kalan_koli = total_koli - minimum_total
     
     if kalan_koli > 0:
@@ -340,7 +395,7 @@ def calculate_kasa_aktivitesi(tables, urun):
     
     # Sütun sırası
     column_order = [
-        "magaza_kodu", "magaza_adi", "urun_kodu", "urun_adi", "dagitilan_koli", "skor",
+        "magaza_kodu", "magaza_adi", "urun_kodu", "urun_adi", "dagitilan_koli", "minimum_koli", "skor",
         "stok", "satis_4hafta", "ara_satis", "toplam_satis_gucu", "ks_ciro",
         "hangi_ilce", "hangi_ilce_score", "stok_orani"
     ]
@@ -350,6 +405,9 @@ def calculate_kasa_aktivitesi(tables, urun):
     
     if "stok_4hafta_sonunda" in dagitim_verileri.columns:
         column_order.append("stok_4hafta_sonunda")
+    
+    if "aylik_stok" in dagitim_verileri.columns:
+        column_order.append("aylik_stok")
     
     available_columns = [col for col in column_order if col in dagitim_verileri.columns]
     return dagitim_verileri[available_columns]
