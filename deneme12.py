@@ -107,25 +107,10 @@ def calculate_distribution_plan(tables, urun):
         skor += normalize_column(dagitim_verileri, col) * weight
 
     if urun["yeni_mi"] == "eski":
-        total_satis_sum = dagitim_verileri["satis"].sum()
-        if total_satis_sum > 0:
-            skor += dagitim_verileri["satis_hizi"] * (0.90 / total_weight)
-            penalty = dagitim_verileri["stok_orani"] * (0.45 / total_weight)
-            has_sales = dagitim_verileri["satis"] > 0
-            skor -= penalty.where(has_sales, 0)
+        skor += dagitim_verileri["satis_hizi"] * (0.90 / total_weight)
+        skor -= dagitim_verileri["stok_orani"] * (0.45 / total_weight)
 
     dagitim_verileri["skor"] = skor.clip(lower=0)
-
-    # Fallback: if all scores are 0, distribute based on gs_ciro + ortalama_ciro
-    if dagitim_verileri["skor"].sum() == 0:
-        fallback = pd.Series([0.0]*len(dagitim_verileri))
-        for col in ["gs_ciro", "ortalama_ciro"]:
-            if col in dagitim_verileri.columns:
-                fallback += normalize_column(dagitim_verileri, col)
-        if fallback.sum() > 0:
-            dagitim_verileri["skor"] = fallback
-        else:
-            dagitim_verileri["skor"] = 1.0
 
     total = urun["dagitilacak_koli"]
     skor_toplam = dagitim_verileri["skor"].sum()
